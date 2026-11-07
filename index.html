@@ -308,6 +308,7 @@
       transition: opacity 0.25s, transform 0.2s;
       pointer-events: auto;
       cursor: pointer;
+      z-index: 8;
     }
 
     #prompt:active {
@@ -432,6 +433,7 @@
       position: absolute;
       pointer-events: auto;
       touch-action: none;
+      z-index: 8;
       display: flex;
       flex-direction: column;
       align-items: center;
@@ -531,6 +533,7 @@
       justify-content: center;
       pointer-events: auto;
       cursor: pointer;
+      z-index: 8;
       backdrop-filter: blur(4px);
     }
 
@@ -647,6 +650,7 @@
       font-size: 11px;
       letter-spacing: 3px;
       cursor: pointer;
+      z-index: 8;
       transition: background 0.2s, border-color 0.2s, transform 0.1s;
       border-radius: 4px;
       width: 100%;
@@ -1565,6 +1569,7 @@
       return null;
     }
 
+    const staticObstacles = [];
     const hidingSpots = [];
 
     function createHidingSpot(surface, kind) {
@@ -1619,10 +1624,26 @@
         surface.x + surface.normal.x * 0.42, 0, surface.z + surface.normal.z * 0.42
       );
       const outsidePos = new THREE.Vector3(
-        surface.x + surface.normal.x * 1.12, 0, surface.z + surface.normal.z * 1.12
+        surface.x + surface.normal.x * 1.15, 0, surface.z + surface.normal.z * 1.15
+      );
+      const interactPos = new THREE.Vector3(
+        surface.x + surface.normal.x * 0.95, 0, surface.z + surface.normal.z * 0.95
       );
 
       const lookYaw = Math.atan2(-surface.normal.x, -surface.normal.z);
+
+      let boxMinX, boxMaxX, boxMinZ, boxMaxZ;
+      if (Math.abs(surface.normal.x) > 0.5) {
+        boxMinX = Math.min(surface.x + surface.normal.x * 0.05, surface.x + surface.normal.x * (0.11 + D));
+        boxMaxX = Math.max(surface.x + surface.normal.x * 0.05, surface.x + surface.normal.x * (0.11 + D));
+        boxMinZ = surface.z - W * 0.5;
+        boxMaxZ = surface.z + W * 0.5;
+      } else {
+        boxMinZ = Math.min(surface.z + surface.normal.z * 0.05, surface.z + surface.normal.z * (0.11 + D));
+        boxMaxZ = Math.max(surface.z + surface.normal.z * 0.05, surface.z + surface.normal.z * (0.11 + D));
+        boxMinX = surface.x - W * 0.5;
+        boxMaxX = surface.x + W * 0.5;
+      }
 
       hidingSpots.push({
         kind,
@@ -1632,7 +1653,8 @@
         rightHinge,
         insidePos,
         outsidePos,
-        interactPos: new THREE.Vector3(surface.x + surface.normal.x * 0.75, 0, surface.z + surface.normal.z * 0.75),
+        interactPos,
+        box: { minX: boxMinX, maxX: boxMaxX, minZ: boxMinZ, maxZ: boxMaxZ },
         normal: surface.normal.clone(),
         lookYaw,
         doorAngle: 0,
@@ -1696,6 +1718,7 @@
       crate.add(topPlate);
 
       scene.add(crate);
+      staticObstacles.push({ minX: pos.x - 0.32, maxX: pos.x + 0.32, minZ: pos.z - 0.28, maxZ: pos.z + 0.28 });
       return new THREE.Vector3(pos.x, 0.82, pos.z);
     }
 
@@ -1761,6 +1784,24 @@
     const panelBox = new THREE.Mesh(unitBox, techCabinetMaterial);
     panelBox.scale.set(0.68, 0.82, 0.16);
     panelGroup.add(panelBox);
+
+    if (panelSurface) {
+      const pD = 0.22;
+      const pW = 0.76;
+      let pMinX, pMaxX, pMinZ, pMaxZ;
+      if (Math.abs(panelSurface.normal.x) > 0.5) {
+        pMinX = Math.min(panelSurface.x + panelSurface.normal.x * 0.05, panelSurface.x + panelSurface.normal.x * (0.12 + pD));
+        pMaxX = Math.max(panelSurface.x + panelSurface.normal.x * 0.05, panelSurface.x + panelSurface.normal.x * (0.12 + pD));
+        pMinZ = panelSurface.z - pW * 0.5;
+        pMaxZ = panelSurface.z + pW * 0.5;
+      } else {
+        pMinZ = Math.min(panelSurface.z + panelSurface.normal.z * 0.05, panelSurface.z + panelSurface.normal.z * (0.12 + pD));
+        pMaxZ = Math.max(panelSurface.z + panelSurface.normal.z * 0.05, panelSurface.z + panelSurface.normal.z * (0.12 + pD));
+        pMinX = panelSurface.x - pW * 0.5;
+        pMaxX = panelSurface.x + pW * 0.5;
+      }
+      staticObstacles.push({ minX: pMinX, maxX: pMaxX, minZ: pMinZ, maxZ: pMaxZ });
+    }
 
     const panelSlotMeshes = [];
     for (const sx of [-0.14, 0.02]) {
@@ -2067,34 +2108,40 @@
           resolve(true);
         };
 
-        if (window.__SHADOWSTALKER_MODEL_B64) {
-          try {
-            const binaryString = atob(window.__SHADOWSTALKER_MODEL_B64);
-            const len = binaryString.length;
-            const bytes = new Uint8Array(len);
-            for (let i = 0; i < len; i++) {
-              bytes[i] = binaryString.charCodeAt(i);
+        function parseBase64() {
+          if (window.__SHADOWSTALKER_MODEL_B64) {
+            try {
+              const binaryString = atob(window.__SHADOWSTALKER_MODEL_B64);
+              const len = binaryString.length;
+              const bytes = new Uint8Array(len);
+              for (let i = 0; i < len; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+              }
+              gltfLoader.parse(bytes.buffer, "", onLoaded, (err) => {
+                console.error("Base64 model parse error:", err);
+                resolve(false);
+              });
+              return true;
+            } catch (e) {
+              console.warn("Base64 decode error:", e);
             }
-            gltfLoader.parse(bytes.buffer, "", onLoaded, (err) => {
-              console.warn("Base64 model parse error, falling back to fetch", err);
-              loadFromUrl();
-            });
-            return;
-          } catch (e) {
-            console.warn("Base64 decode error, falling back to fetch", e);
           }
+          return false;
         }
 
-        function loadFromUrl() {
+        // Если запуск на HTTP/HTTPS — загружаем файл напрямую, минуя тяжелый sync decode base64
+        if (location.protocol.startsWith("http")) {
           gltfLoader.load("shadowstalker.glb", onLoaded, undefined, () => {
-            gltfLoader.load("shadowstalker_lod0.glb", onLoaded, undefined, (err2) => {
-              console.error("Could not load monster GLB:", err2);
-              resolve(false);
+            gltfLoader.load("shadowstalker_lod0.glb", onLoaded, undefined, () => {
+              if (!parseBase64()) resolve(false);
             });
           });
+        } else {
+          // Если запуск с диска (file://) — используем base64 скрипт для обхода CORS
+          if (!parseBase64()) {
+            gltfLoader.load("shadowstalker.glb", onLoaded, undefined, () => resolve(false));
+          }
         }
-
-        loadFromUrl();
       });
     }
 
@@ -2393,8 +2440,75 @@
       return c;
     }
 
+    function resolveBoxCollision(pos, minX, maxX, minZ, maxZ, radius) {
+      const nx = clamp(pos.x, minX, maxX);
+      const nz = clamp(pos.z, minZ, maxZ);
+      const dx = pos.x - nx;
+      const dz = pos.z - nz;
+      const distSq = dx * dx + dz * dz;
+
+      if (distSq < radius * radius) {
+        const dist = Math.sqrt(distSq);
+        if (dist < 0.0001) {
+          const dLeft = Math.abs(pos.x - minX);
+          const dRight = Math.abs(maxX - pos.x);
+          const dBottom = Math.abs(pos.z - minZ);
+          const dTop = Math.abs(maxZ - pos.z);
+          const minEdge = Math.min(dLeft, dRight, dBottom, dTop);
+          if (minEdge === dLeft) pos.x = minX - radius - 0.002;
+          else if (minEdge === dRight) pos.x = maxX + radius + 0.002;
+          else if (minEdge === dBottom) pos.z = minZ - radius - 0.002;
+          else pos.z = maxZ + radius + 0.002;
+        } else {
+          const overlap = radius - dist;
+          pos.x += (dx / dist) * overlap;
+          pos.z += (dz / dist) * overlap;
+        }
+      }
+    }
+
+    function resolveCollisions(pos, radius) {
+      if (isHiding && activeHideSpot) return;
+
+      const minX = Math.floor((pos.x - radius) / CELL + 0.5);
+      const maxX = Math.floor((pos.x + radius) / CELL + 0.5);
+      const minZ = Math.floor((pos.z - radius) / CELL + 0.5);
+      const maxZ = Math.floor((pos.z + radius) / CELL + 0.5);
+
+      for (let gz = minZ; gz <= maxZ; gz++) {
+        for (let gx = minX; gx <= maxX; gx++) {
+          if (walkable(gx, gz)) continue;
+          let inAnyDoor = false;
+          for (let i = 0; i < doors.length; i++) {
+            const d = doors[i];
+            if (d.open && inPocket(d, pos.x, pos.z)) {
+              inAnyDoor = true;
+              break;
+            }
+          }
+          if (inAnyDoor) continue;
+
+          const half = CELL * 0.5 + 0.10;
+          resolveBoxCollision(pos, gx * CELL - half, gx * CELL + half, gz * CELL - half, gz * CELL + half, radius);
+        }
+      }
+
+      for (let i = 0; i < staticObstacles.length; i++) {
+        const obs = staticObstacles[i];
+        resolveBoxCollision(pos, obs.minX, obs.maxX, obs.minZ, obs.maxZ, radius);
+      }
+
+      for (let i = 0; i < hidingSpots.length; i++) {
+        const spot = hidingSpots[i];
+        if (isHiding && activeHideSpot === spot) continue;
+        if (!spot.box) continue;
+        resolveBoxCollision(pos, spot.box.minX, spot.box.maxX, spot.box.minZ, spot.box.maxZ, radius);
+      }
+    }
+
     function circleFree(x, z, radius) {
-      for (const d of doors) {
+      for (let i = 0; i < doors.length; i++) {
+        const d = doors[i];
         if (d.open && inPocket(d, x, z)) return true;
       }
       const minX = Math.floor((x - radius) / CELL + 0.5);
@@ -2413,6 +2527,28 @@
           if (dx * dx + dz * dz < radius * radius) return false;
         }
       }
+
+      for (let i = 0; i < staticObstacles.length; i++) {
+        const obs = staticObstacles[i];
+        const nx = clamp(x, obs.minX, obs.maxX);
+        const nz = clamp(z, obs.minZ, obs.maxZ);
+        const dx = x - nx;
+        const dz = z - nz;
+        if (dx * dx + dz * dz < radius * radius) return false;
+      }
+
+      for (let i = 0; i < hidingSpots.length; i++) {
+        const spot = hidingSpots[i];
+        if (isHiding && activeHideSpot === spot) continue;
+        const b = spot.box;
+        if (!b) continue;
+        const nx = clamp(x, b.minX, b.maxX);
+        const nz = clamp(z, b.minZ, b.maxZ);
+        const dx = x - nx;
+        const dz = z - nz;
+        if (dx * dx + dz * dz < radius * radius) return false;
+      }
+
       return true;
     }
 
@@ -2430,12 +2566,13 @@
     }
 
     function moveWithCollision(position, dx, dz, radius) {
-      const steps = Math.max(1, Math.ceil(Math.max(Math.abs(dx), Math.abs(dz)) / 0.08));
+      const steps = Math.max(1, Math.ceil(Math.max(Math.abs(dx), Math.abs(dz)) / 0.06));
       for (let i = 0; i < steps; i++) {
         const sx = dx / steps;
         const sz = dz / steps;
         if (circleFree(position.x + sx, position.z, radius)) position.x += sx;
         if (circleFree(position.x, position.z + sz, radius)) position.z += sz;
+        resolveCollisions(position, radius);
       }
     }
 
@@ -2690,6 +2827,7 @@
       }
       panelLeverPivot.rotation.x = -0.65;
       panelLamp.material = glowRedMat;
+      leverHandle.material = glowRedMat;
       exitLamp.material = glowRedMat;
 
       for (const el of emergencyLights) {
@@ -2987,6 +3125,7 @@
     lookZone.addEventListener("touchstart", (e) => {
       if (state !== "playing") return;
       e.preventDefault();
+      if (touchLookId !== null) return;
       const touch = e.changedTouches[0];
       touchLookId = touch.identifier;
       lastLookX = touch.clientX;
@@ -3062,7 +3201,7 @@
     $("btn-breath").addEventListener("pointercancel", endBreath);
 
     // Кнопка паузы
-    $("btn-pause").addEventListener("click", (e) => {
+    const handlePause = (e) => {
       e.preventDefault();
       if (state === "playing") {
         state = "paused";
@@ -3070,7 +3209,9 @@
         audio.pause();
         showOverlay("paused");
       }
-    });
+    };
+    $("btn-pause").addEventListener("pointerdown", handlePause);
+    $("btn-pause").addEventListener("click", (e) => e.preventDefault());
 
     // Клик по центру экрана на подсказку взаимодействия
     $("prompt").addEventListener("pointerdown", (e) => {
@@ -3159,8 +3300,14 @@
       velocity.set(0, 0, 0);
       hideMovementNoise = 0;
 
-      yaw = spot.lookYaw;
+      const angleDiff = Math.atan2(
+        Math.sin(spot.lookYaw - yaw),
+        Math.cos(spot.lookYaw - yaw)
+      );
+      yaw = yaw + angleDiff;
+      smoothYaw = yaw;
       pitch = 0;
+      smoothPitch = 0;
 
       $("hide-overlay").classList.add("visible");
       $("breath-panel").classList.add("visible");
@@ -3964,6 +4111,7 @@
       $("hud").classList.remove("visible");
       $("touch-controls").classList.remove("active");
       $("hide-overlay").classList.remove("visible");
+      $("breath-panel").classList.remove("visible");
       $("damage").style.opacity = "0";
       $("shock").style.opacity = "0";
 
